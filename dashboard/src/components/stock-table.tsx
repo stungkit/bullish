@@ -1,5 +1,11 @@
-import { ChevronDown, ChevronRight } from "lucide-react";
-import { useState } from "react";
+import {
+	ArrowDown,
+	ArrowUp,
+	ChevronDown,
+	ChevronRight,
+	ChevronsUpDown,
+} from "lucide-react";
+import { useMemo, useState } from "react";
 import { AiBadge } from "@/components/ai-badge";
 import { RsiGauge } from "@/components/rsi-gauge";
 import {
@@ -18,13 +24,22 @@ import {
 	pctColor,
 	ratingColor,
 	ratingLabel,
+	verdictBadgeClasses,
+	verdictLabel,
 } from "@/lib/format";
-import type { ColumnDef, ColumnKey, Stock } from "@/lib/types";
+import {
+	type ColumnDef,
+	type ColumnKey,
+	PERIOD_FIELD,
+	type Period,
+	type Stock,
+} from "@/lib/types";
 
 type StockTableProps = {
 	stocks: Stock[];
 	columns: ColumnDef[];
 	showAI: boolean;
+	period?: Period;
 };
 
 const alignClass = (align: string): string => {
@@ -34,7 +49,75 @@ const alignClass = (align: string): string => {
 	return "text-left";
 };
 
-const cellContent = (stock: Stock, key: ColumnKey): React.ReactNode => {
+const justifyClass = (align: string): string => {
+	if (align === "right") return "justify-end";
+	if (align === "center") return "justify-center";
+
+	return "justify-start";
+};
+
+const RATING_RANK: Record<string, number> = {
+	strong_buy: 5,
+	buy: 4,
+	hold: 3,
+	sell: 2,
+	strong_sell: 1,
+};
+
+const VERDICT_RANK: Record<string, number> = {
+	good_buy: 4,
+	neutral: 3,
+	weak: 2,
+	extended: 1,
+	overheated: 0,
+};
+
+type SortDir = "asc" | "desc";
+
+const sortValue = (
+	stock: Stock,
+	key: ColumnKey,
+	period?: Period,
+): number | string => {
+	switch (key) {
+		case "ticker":
+			return stock.ticker.toLowerCase();
+		case "name":
+			return stock.name.toLowerCase();
+		case "rating":
+			return RATING_RANK[stock.rating?.toLowerCase()] ?? 0;
+		case "buy_verdict":
+			return VERDICT_RANK[stock.buy_verdict] ?? 0;
+		case "period_return":
+			return period ? (stock[PERIOD_FIELD[period]] as number) : 0;
+		case "price":
+			return stock.price;
+		case "ath":
+			return stock.ath;
+		case "pct_from_ath":
+			return stock.pct_from_ath;
+		case "fair_value":
+			return stock.fair_value;
+		case "upside":
+			return stock.upside;
+		case "rsi":
+			return stock.rsi;
+		case "change_1d":
+			return stock.change_1d;
+		case "streak":
+			return stock.streak;
+		case "roc_30d":
+			return stock.roc_30d;
+		default:
+			return 0;
+	}
+};
+
+const cellContent = (
+	stock: Stock,
+	key: ColumnKey,
+	period?: Period,
+): React.ReactNode => {
 	switch (key) {
 		case "ticker":
 			return (
@@ -100,13 +183,39 @@ const cellContent = (stock: Stock, key: ColumnKey): React.ReactNode => {
 					{formatPct(stock.roc_30d)}
 				</span>
 			);
+		case "period_return": {
+			const value = period ? (stock[PERIOD_FIELD[period]] as number) : 0;
+			return (
+				<span className={cn("font-semibold", pctColor(value))}>
+					{formatPct(value)}
+				</span>
+			);
+		}
+		case "buy_verdict":
+			return (
+				<span
+					className={cn(
+						"rounded-md px-2 py-0.5 text-xs font-semibold",
+						verdictBadgeClasses(stock.buy_verdict),
+					)}
+				>
+					{verdictLabel(stock.buy_verdict)}
+				</span>
+			);
 		default:
 			return null;
 	}
 };
 
-export const StockTable = ({ stocks, columns, showAI }: StockTableProps) => {
+export const StockTable = ({
+	stocks,
+	columns,
+	showAI,
+	period,
+}: StockTableProps) => {
 	const [expanded, setExpanded] = useState<Set<string>>(new Set());
+	const [sortKey, setSortKey] = useState<ColumnKey | null>(null);
+	const [sortDir, setSortDir] = useState<SortDir>("desc");
 
 	const toggle = (ticker: string) => {
 		setExpanded((prev) => {
@@ -117,6 +226,33 @@ export const StockTable = ({ stocks, columns, showAI }: StockTableProps) => {
 			return next;
 		});
 	};
+
+	const cycleSort = (key: ColumnKey) => {
+		if (sortKey !== key) {
+			setSortKey(key);
+			setSortDir("desc");
+			return;
+		}
+		if (sortDir === "desc") {
+			setSortDir("asc");
+			return;
+		}
+		setSortKey(null);
+		setSortDir("desc");
+	};
+
+	const sortedStocks = useMemo<Stock[]>(() => {
+		if (!sortKey) return stocks;
+		const dir = sortDir === "asc" ? 1 : -1;
+		return [...stocks].sort((a, b) => {
+			const va = sortValue(a, sortKey, period);
+			const vb = sortValue(b, sortKey, period);
+			if (va < vb) return -1 * dir;
+			if (va > vb) return 1 * dir;
+
+			return 0;
+		});
+	}, [stocks, sortKey, sortDir, period]);
 
 	if (stocks.length === 0) {
 		return (
@@ -129,21 +265,45 @@ export const StockTable = ({ stocks, columns, showAI }: StockTableProps) => {
 	return (
 		<Table>
 			<TableHeader>
-				<TableRow className="border-white/10 hover:bg-transparent">
+				<TableRow className="group/header border-white/10 hover:bg-transparent">
 					{showAI && <TableHead className="w-8" />}
-					{columns.map((col) => (
-						<TableHead key={col.key} className={alignClass(col.align)}>
-							{col.tooltip ? (
-								<Tooltip content={col.tooltip}>{col.label}</Tooltip>
-							) : (
-								col.label
-							)}
-						</TableHead>
-					))}
+					{columns.map((col) => {
+						const active = sortKey === col.key;
+						const label = col.tooltip ? (
+							<Tooltip content={col.tooltip}>{col.label}</Tooltip>
+						) : (
+							col.label
+						);
+
+						return (
+							<TableHead key={col.key} className={alignClass(col.align)}>
+								<button
+									type="button"
+									onClick={() => cycleSort(col.key)}
+									className={cn(
+										"inline-flex w-full items-center gap-1 transition-colors hover:text-text-primary",
+										justifyClass(col.align),
+										active ? "text-text-primary" : "",
+									)}
+								>
+									{label}
+									{active ? (
+										sortDir === "desc" ? (
+											<ArrowDown className="h-3 w-3" />
+										) : (
+											<ArrowUp className="h-3 w-3" />
+										)
+									) : (
+										<ChevronsUpDown className="h-3 w-3 opacity-0 transition-opacity group-hover/header:opacity-40" />
+									)}
+								</button>
+							</TableHead>
+						);
+					})}
 				</TableRow>
 			</TableHeader>
 			<TableBody>
-				{stocks.map((stock) => {
+				{sortedStocks.map((stock) => {
 					const hasAI = showAI && !!stock.ai_assessment;
 					const isExpanded = expanded.has(stock.ticker);
 
@@ -169,7 +329,7 @@ export const StockTable = ({ stocks, columns, showAI }: StockTableProps) => {
 								)}
 								{columns.map((col) => (
 									<TableCell key={col.key} className={alignClass(col.align)}>
-										{cellContent(stock, col.key)}
+										{cellContent(stock, col.key, period)}
 									</TableCell>
 								))}
 							</TableRow>

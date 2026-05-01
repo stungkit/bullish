@@ -74,6 +74,16 @@ class Stock:
     upside: float = 0.0
     rating: str = ""
     fv_vs_ath: float = 0.0
+    roc_1d: float = 0.0
+    roc_1w: float = 0.0
+    roc_1m: float = 0.0
+    roc_3m: float = 0.0
+    roc_6m: float = 0.0
+    roc_ytd: float = 0.0
+    roc_1y: float = 0.0
+    roc_5y: float = 0.0
+    roc_10y: float = 0.0
+    buy_verdict: str = "neutral"
 
 
 @dataclass
@@ -87,6 +97,7 @@ class ScanResult:
     down_streaks: list[Stock]
     up_streaks: list[Stock]
     parabolic: list[Stock]
+    all_stocks: list[Stock] = field(default_factory=list)
 
 
 def fetch_sp500_tickers() -> list[str]:
@@ -134,6 +145,37 @@ def calculate_rsi(prices: pd.Series, period: int = 14) -> float:
     rsi = 100 - (100 / (1 + rs))
 
     return rsi.iloc[-1] if not rsi.empty else 50
+
+
+def period_return(close: pd.Series, days: int) -> float:
+    if len(close) <= days:
+        return 0.0
+    start = close.iloc[-1 - days]
+    if start == 0:
+        return 0.0
+    return ((close.iloc[-1] - start) / start) * 100
+
+
+def ytd_return(close: pd.Series) -> float:
+    if close.empty:
+        return 0.0
+    year_start = close.index[-1].year
+    ytd = close[close.index.year == year_start]
+    if len(ytd) < 2 or ytd.iloc[0] == 0:
+        return 0.0
+    return ((ytd.iloc[-1] - ytd.iloc[0]) / ytd.iloc[0]) * 100
+
+
+def derive_verdict(roc_1m: float, rsi: float, pct_from_ath: float, upside: float) -> str:
+    if rsi > 70 or (roc_1m > 30 and pct_from_ath > -5):
+        return "overheated"
+    if roc_1m > 15 and 60 <= rsi <= 70:
+        return "extended"
+    if upside > 15 and -50 <= pct_from_ath <= -10 and rsi < 55:
+        return "good_buy"
+    if pct_from_ath < -50 and upside < 0:
+        return "weak"
+    return "neutral"
 
 
 def calculate_streak(prices: pd.Series) -> int:
@@ -187,9 +229,6 @@ def analyze_stock(ticker: str, qqq_returns_30d: float) -> Stock | None:
         info = stock.info
 
         sector = info.get("sector", "")
-        if sector not in TECH_SECTORS:
-            return None
-
         market_cap = info.get("marketCap", 0)
         avg_volume = info.get("averageVolume", 0)
         current_price = info.get("currentPrice") or info.get("regularMarketPrice", 0)
@@ -202,7 +241,7 @@ def analyze_stock(ticker: str, qqq_returns_30d: float) -> Stock | None:
         if current_price < MIN_PRICE:
             return None
 
-        hist = stock.history(period="1y")
+        hist = stock.history(period="10y")
         if hist.empty or len(hist) < 30:
             return None
 
@@ -211,7 +250,8 @@ def analyze_stock(ticker: str, qqq_returns_30d: float) -> Stock | None:
 
         ath = close.max()
         pct_from_ath = ((current_price - ath) / ath) * 100
-        high_52w = close.max()
+        close_1y = close.iloc[-252:] if len(close) >= 252 else close
+        high_52w = close_1y.max()
         rsi = calculate_rsi(close)
         streak = calculate_streak(close)
 
@@ -226,6 +266,19 @@ def analyze_stock(ticker: str, qqq_returns_30d: float) -> Stock | None:
             roc_30d = ((current_price - price_30d_ago) / price_30d_ago) * 100
         else:
             roc_30d = 0
+
+        roc_1d = change_1d
+        roc_1w = period_return(close, 5)
+        roc_1m = period_return(close, 21)
+        roc_3m = period_return(close, 63)
+        roc_6m = period_return(close, 126)
+        roc_1y = period_return(close, 252)
+        roc_5y = period_return(close, 1260)
+        if len(close) > 1 and close.iloc[0] != 0:
+            roc_10y = ((close.iloc[-1] - close.iloc[0]) / close.iloc[0]) * 100
+        else:
+            roc_10y = 0.0
+        roc_ytd = ytd_return(close)
 
         rs_vs_qqq = roc_30d - qqq_returns_30d
 
@@ -243,6 +296,7 @@ def analyze_stock(ticker: str, qqq_returns_30d: float) -> Stock | None:
         rating = info.get("recommendationKey", "") or ""
         upside = ((fair_value - current_price) / current_price) * 100 if fair_value and current_price else 0.0
         fv_vs_ath = ((fair_value - ath) / ath) * 100 if fair_value and ath else 0.0
+        buy_verdict = derive_verdict(roc_1m, rsi, pct_from_ath, upside)
 
         return Stock(
             ticker=ticker,
@@ -265,6 +319,16 @@ def analyze_stock(ticker: str, qqq_returns_30d: float) -> Stock | None:
             upside=upside,
             rating=rating,
             fv_vs_ath=fv_vs_ath,
+            roc_1d=roc_1d,
+            roc_1w=roc_1w,
+            roc_1m=roc_1m,
+            roc_3m=roc_3m,
+            roc_6m=roc_6m,
+            roc_ytd=roc_ytd,
+            roc_1y=roc_1y,
+            roc_5y=roc_5y,
+            roc_10y=roc_10y,
+            buy_verdict=buy_verdict,
         )
 
     except Exception:
@@ -551,6 +615,7 @@ def load_results(json_path: Path) -> ScanResult:
         down_streaks=[Stock(**s) for s in data["down_streaks"]],
         up_streaks=[Stock(**s) for s in data["up_streaks"]],
         parabolic=[Stock(**s) for s in data["parabolic"]],
+        all_stocks=[Stock(**s) for s in data.get("all_stocks", [])],
     )
 
 
@@ -593,6 +658,7 @@ def save_results(result: ScanResult, output_dir: Path) -> tuple[Path, Path]:
         "down_streaks": [convert_to_json_serializable(asdict(s)) for s in result.down_streaks],
         "up_streaks": [convert_to_json_serializable(asdict(s)) for s in result.up_streaks],
         "parabolic": [convert_to_json_serializable(asdict(s)) for s in result.parabolic],
+        "all_stocks": [convert_to_json_serializable(asdict(s)) for s in result.all_stocks],
     }
     with open(json_path, "w") as f:
         json.dump(data, f, indent=2)
@@ -647,7 +713,7 @@ def scan(skip_ai: bool = False) -> ScanResult:
                 if result:
                     results.append(result)
 
-    console.print(f"\n[green]Found {len(results)} tech stocks matching criteria[/green]\n")
+    console.print(f"\n[green]Found {len(results)} stocks matching criteria[/green]\n")
 
     if not results:
         console.print("[red]No stocks matched the criteria.[/red]")
@@ -661,6 +727,7 @@ def scan(skip_ai: bool = False) -> ScanResult:
             down_streaks=[],
             up_streaks=[],
             parabolic=[],
+            all_stocks=[],
         )
 
     # Categorize stocks
@@ -706,7 +773,7 @@ def scan(skip_ai: bool = False) -> ScanResult:
 
     console.print()
     parabolic_cols = [("Ticker", 6), ("Name", 18), ("Price", 7), ("%ATH", 8), ("30d%", 8), ("FV", 7), ("%FV", 5), ("FV%ATH", 6), ("Rating", 6), ("RSI", 4), ("Signal", 6)]
-    render_table_simple("🚀 PARABOLIC - Strong Momentum", parabolic, parabolic_cols)
+    render_table_simple("🚀 HOT STREAKS - Strong Momentum", parabolic, parabolic_cols)
 
     # Summary
     buy_signals = len([s for s in results if s.rsi < 30])
@@ -728,6 +795,9 @@ def scan(skip_ai: bool = False) -> ScanResult:
     console.print()
     console.print(summary)
 
+    # Full universe sorted by 1-month return for the leaderboard
+    all_stocks = sorted(results, key=lambda x: -x.roc_1m)
+
     # Create result object
     scan_result = ScanResult(
         timestamp=datetime.now().isoformat(),
@@ -739,6 +809,7 @@ def scan(skip_ai: bool = False) -> ScanResult:
         down_streaks=down_streaks,
         up_streaks=up_streaks,
         parabolic=parabolic,
+        all_stocks=all_stocks,
     )
 
     # Save results
@@ -789,7 +860,7 @@ def render(result: ScanResult) -> None:
 
     console.print()
     parabolic_cols = [("Ticker", 6), ("Name", 18), ("Price", 7), ("%ATH", 8), ("30d%", 8), ("FV", 7), ("%FV", 5), ("FV%ATH", 6), ("Rating", 6), ("RSI", 4), ("Signal", 6)]
-    render_table_simple("🚀 PARABOLIC - Strong Momentum", result.parabolic, parabolic_cols)
+    render_table_simple("🚀 HOT STREAKS - Strong Momentum", result.parabolic, parabolic_cols)
 
     # Summary
     all_stocks_count = result.total_stocks

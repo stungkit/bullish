@@ -79,6 +79,24 @@ export const TABS_WITH_AI: TabKey[] = [
 	"down_streaks",
 ];
 
+export const verdictLabel = (verdict: string): string => {
+	if (verdict === "good_buy") return "Good Buy";
+	if (verdict === "extended") return "Extended";
+	if (verdict === "overheated") return "Overheated";
+	if (verdict === "weak") return "Weak";
+
+	return "Neutral";
+};
+
+export const verdictBadgeClasses = (verdict: string): string => {
+	if (verdict === "good_buy") return "bg-green-500/15 text-green-400";
+	if (verdict === "extended") return "bg-amber-500/15 text-amber-400";
+	if (verdict === "overheated") return "bg-red-500/15 text-red-400";
+	if (verdict === "weak") return "bg-red-500/15 text-red-400";
+
+	return "bg-slate-500/15 text-slate-400";
+};
+
 const COLUMN_TOOLTIPS: Record<string, string> = {
 	ath: "All-Time High: The highest price the stock has ever reached",
 	pct_from_ath:
@@ -95,6 +113,10 @@ const COLUMN_TOOLTIPS: Record<string, string> = {
 		"Streak: Consecutive days up (+) or down (-). Longer streaks may signal reversal",
 	roc_30d:
 		"30-Day ROC: Rate of change over 30 days. High values indicate parabolic momentum",
+	period_return:
+		"Return over the selected time period. Pick a period above to re-rank.",
+	buy_verdict:
+		"Derived verdict combining recent return, RSI, %ATH and analyst upside. Not financial advice.",
 };
 
 export const TAB_CONFIG: Record<
@@ -322,7 +344,7 @@ export const TAB_CONFIG: Record<
 		],
 	},
 	parabolic: {
-		label: "Parabolic",
+		label: "Hot Streaks",
 		columns: [
 			{ key: "ticker", label: "Ticker", align: "left" },
 			{ key: "name", label: "Name", align: "left" },
@@ -362,6 +384,50 @@ export const TAB_CONFIG: Record<
 				label: "RSI",
 				align: "right",
 				tooltip: COLUMN_TOOLTIPS.rsi,
+			},
+		],
+	},
+	top_performers: {
+		label: "Top Performers",
+		columns: [
+			{ key: "ticker", label: "Ticker", align: "left" },
+			{ key: "name", label: "Name", align: "left" },
+			{
+				key: "period_return",
+				label: "Return",
+				align: "right",
+				tooltip: COLUMN_TOOLTIPS.period_return,
+			},
+			{ key: "price", label: "Price", align: "right" },
+			{
+				key: "pct_from_ath",
+				label: "%ATH",
+				align: "right",
+				tooltip: COLUMN_TOOLTIPS.pct_from_ath,
+			},
+			{
+				key: "rsi",
+				label: "RSI",
+				align: "right",
+				tooltip: COLUMN_TOOLTIPS.rsi,
+			},
+			{
+				key: "rating",
+				label: "Rating",
+				align: "center",
+				tooltip: COLUMN_TOOLTIPS.rating,
+			},
+			{
+				key: "upside",
+				label: "%FV",
+				align: "right",
+				tooltip: COLUMN_TOOLTIPS.upside,
+			},
+			{
+				key: "buy_verdict",
+				label: "Verdict",
+				align: "center",
+				tooltip: COLUMN_TOOLTIPS.buy_verdict,
 			},
 		],
 	},

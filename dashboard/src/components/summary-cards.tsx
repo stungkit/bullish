@@ -20,7 +20,7 @@ export const SummaryCards = ({ scan }: SummaryCardsProps) => {
 		{ label: "Big Gains", value: scan.big_gains.length },
 		{ label: "Down Streaks", value: scan.down_streaks.length },
 		{ label: "Up Streaks", value: scan.up_streaks.length },
-		{ label: "Parabolic", value: scan.parabolic.length },
+		{ label: "Hot Streaks", value: scan.parabolic.length },
 		{
 			label: "QQQ 30d",
 			value: formatPct(scan.qqq_30d_return),
